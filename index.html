@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Core Macro Risk Monitor | Agentic Insight Capital</title>
+<meta name="description" content="Multi-dimensional real-time macro risk surveillance by Agentic Insight Capital.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #0a1628;
+    --navy-mid: #0f1d33;
+    --navy-light: #162846;
+    --gold: #b8973a;
+    --gold-light: #d4af52;
+    --gold-muted: rgba(184, 151, 58, 0.15);
+    --slate: #8899b0;
+    --slate-light: #a3b3c8;
+    --ice: #c8d4e2;
+    --white: #f0f2f5;
+    --border: rgba(184, 151, 58, 0.12);
+    --border-gold: rgba(184, 151, 58, 0.3);
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-body: 'Outfit', sans-serif;
+  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font-body);
+    background: var(--navy);
+    color: var(--white);
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+// ─── COLORS ─────────────────────────────────────────────────────────
+const C = {
+  navy:"#0a1628", navyMid:"#0f1d33", navyLight:"#162846",
+  gold:"#b8973a", goldLight:"#d4af52", goldMuted:"rgba(184,151,58,0.15)",
+  slate:"#8899b0", slateLight:"#a3b3c8", ice:"#c8d4e2", white:"#f0f2f5",
+  green:"#4a9e6f", red:"#b04040", amber:"#c08830",
+  border:"rgba(184,151,58,0.12)", borderGold:"rgba(184,151,58,0.3)",
+};
+
+// ─── THRESHOLDS ─────────────────────────────────────────────────────
+const TH = {
+  hySpread:   {normal:400, warning:500, trigger:600},
+  igCds:      {normal:70,  warning:90},
+  sovCds:     {normal:40,  warning:70,  trigger:80},
+  us10y:      {normal:4.0, warning:4.5},
+  yieldCurve: {normal:-0.5,warning:-0.1},
+  realYield:  {normal:1.5, warning:2.0},
+  move:       {normal:100, warning:130, trigger:140, crisis:160},
+  vix:        {normal:20,  warning:30,  trigger:40},
+  ovx:        {normal:35,  warning:50,  trigger:70},
+  oil:        {normal:90,  warning:110, trigger:130},
+  dxy:        {normal:98,  warning:102},
+  kre:        {normal:-3,  warning:-5,  trigger:-10},
+};
+
+function getStatus(val, id) {
+  if (val == null) return "loading";
+  const t = TH[id];
+  if (!t) return "normal";
+  if (id === "yieldCurve") {
+    if (val < t.normal) return "normal";
+    if (val < t.warning) return "warning";
+    return "trigger";
+  }
+  if (id === "kre") {
+    if (val > t.normal) return "normal";
+    if (val > t.warning) return "warning";
+    if (val > t.trigger) return "trigger";
+    return "crisis";
+  }
+  if (t.crisis && val > t.crisis) return "crisis";
+  if (t.trigger && val > t.trigger) return "trigger";
+  if (t.warning && val > t.warning) return "warning";
+  return "normal";
+}
+
+const STATUS_COLOR = {normal:C.green, warning:C.amber, trigger:C.red, crisis:"#8b1a1a", loading:C.slate};
+const STATUS_LABEL = {normal:"NORMAL", warning:"ELEVATED", trigger:"HIGH RISK", crisis:"CRISIS", loading:"—"};
+
+// ─── DEMO DATA ──────────────────────────────────────────────────────
+function spark(base, vol, n=30) {
+  const d=[]; let v=base;
+  for(let i=0;i<n;i++){v+=(Math.random()-0.48)*vol; d.push(Math.round(v*100)/100);}
+  return d;
+}
+
+function makeDemoData() {
+  return {
+    hySpread:    {value:387,   change:12,    unit:"bps", spark:spark(380,15)},
+    igCds:       {value:62,    change:-3,    unit:"bps", spark:spark(65,5)},
+    sovCds:      {value:34,    change:2,     unit:"bps", spark:spark(32,4)},
+    us10y:       {value:4.28,  change:0.05,  unit:"%",   spark:spark(4.2,0.08)},
+    yieldCurve:  {value:-0.38, change:0.04,  unit:"%",   spark:spark(-0.42,0.06)},
+    realYield:   {value:1.92,  change:-0.03, unit:"%",   spark:spark(1.95,0.06)},
+    move:        {value:112,   change:5,     unit:"",    spark:spark(108,8)},
+    vix:         {value:18.4,  change:-1.2,  unit:"",    spark:spark(19,2)},
+    ovx:         {value:32,    change:3,     unit:"",    spark:spark(30,4)},
+    oil:         {value:82.5,  change:1.8,   unit:"USD", spark:spark(80,3)},
+    gold:        {value:2345,  change:18,    unit:"USD", spark:spark(2320,20)},
+    copperGold:  {value:-2.1,  change:-0.8,  unit:"%",   spark:spark(-1.5,1)},
+    dxy:         {value:104.2, change:0.3,   unit:"",    spark:spark(103.8,0.6)},
+    kre:         {value:-1.8,  change:-0.5,  unit:"%",   spark:spark(-1.2,1)},
+  };
+}
+
+// ─── API FETCH FUNCTIONS ────────────────────────────────────────────
+// FRED API (St. Louis Fed) — https://api.stlouisfed.org
+// Get your free key at: https://fred.stlouisfed.org/docs/api/api_key.html
+async function fetchFRED(seriesId, apiKey) {
+  if (!apiKey) return null;
+  try {
+    const url = "https://api.stlouisfed.org/fred/series/observations?series_id="
+      + seriesId + "&api_key=" + apiKey
+      + "&file_type=json&sort_order=desc&limit=60";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("FRED " + res.status);
+    const json = await res.json();
+    const obs = (json.observations || []).filter(o => o.value !== ".").slice(0, 30);
+    if (!obs.length) return null;
+    const values = obs.map(o => parseFloat(o.value)).reverse();
+    const cur = values[values.length - 1];
+    const prev = values.length > 1 ? values[values.length - 2] : cur;
+    return {value: cur, change: Math.round((cur - prev) * 100) / 100, spark: values};
+  } catch (e) { console.warn("FRED fetch error (" + seriesId + "):", e); return null; }
+}
+
+// Finnhub API — https://finnhub.io
+// Get your free key at: https://finnhub.io/register
+async function fetchFinnhub(symbol, apiKey) {
+  if (!apiKey) return null;
+  try {
+    const url = "https://finnhub.io/api/v1/quote?symbol=" + symbol + "&token=" + apiKey;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Finnhub " + res.status);
+    const json = await res.json();
+    if (!json.c) return null;
+    return {value: json.c, change: Math.round(json.d * 100) / 100};
+  } catch (e) { console.warn("Finnhub fetch error (" + symbol + "):", e); return null; }
+}
+
+// ─── SPARKLINE (Canvas) ─────────────────────────────────────────────
+function Sparkline({data, width=120, height=32, color=C.gold}) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!ref.current || !data || data.length < 2) return;
+    const cvs = ref.current;
+    const dpr = window.devicePixelRatio || 1;
+    cvs.width = width * dpr; cvs.height = height * dpr;
+    cvs.style.width = width + "px"; cvs.style.height = height + "px";
+    const ctx = cvs.getContext("2d"); ctx.scale(dpr, dpr);
+    const min = Math.min(...data), max = Math.max(...data);
+    const range = max - min || 1;
+    const px = (i) => (i / (data.length - 1)) * width;
+    const py = (v) => height - 2 - ((v - min) / range) * (height - 4);
+    // fill
+    ctx.beginPath(); ctx.moveTo(0, height);
+    data.forEach((v, i) => ctx.lineTo(px(i), py(v)));
+    ctx.lineTo(width, height); ctx.closePath();
+    ctx.fillStyle = color + "0a"; ctx.fill();
+    // line
+    ctx.beginPath(); data.forEach((v, i) => i === 0 ? ctx.moveTo(px(i), py(v)) : ctx.lineTo(px(i), py(v)));
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.stroke();
+  }, [data, width, height, color]);
+  if (!data || data.length < 2) return React.createElement("div", {style:{width, height, background:C.navyLight, opacity:0.3}});
+  return React.createElement("canvas", {ref, style:{display:"block"}});
+}
+
+// ─── INDICATOR CARD ─────────────────────────────────────────────────
+function Card({label, id, value, change, unit, sparkData, subtitle}) {
+  const status = getStatus(value, id);
+  const sColor = STATUS_COLOR[status];
+  const isUp = change > 0;
+  const changeColor = (id==="kre"||id==="copperGold") ? (isUp?C.green:C.red)
+    : (id==="gold" ? C.gold : (isUp?C.red:C.green));
+
+  return React.createElement("div", {style:{
+    background:C.navyMid, border:"1px solid "+C.border, padding:"20px 22px 16px",
+    display:"flex", flexDirection:"column", gap:"8px", minHeight:"160px",
+  }},
+    // top row
+    React.createElement("div", {style:{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}},
+      React.createElement("div", null,
+        React.createElement("div", {style:{fontSize:"0.6rem", letterSpacing:"0.15em", color:C.slate, fontWeight:600, textTransform:"uppercase"}}, label),
+        subtitle && React.createElement("div", {style:{fontSize:"0.55rem", color:C.slate+"88", marginTop:"2px"}}, subtitle)
+      ),
+      // status badge
+      React.createElement("div", {style:{
+        display:"inline-flex", alignItems:"center", gap:"5px",
+        padding:"2px 8px", border:"1px solid "+sColor+"44",
+        background:sColor+"10", fontSize:"0.5rem", fontWeight:600,
+        letterSpacing:"0.1em", color:sColor, textTransform:"uppercase",
+      }},
+        React.createElement("span", {style:{width:"5px", height:"5px", borderRadius:"50%", background:sColor}}),
+        STATUS_LABEL[status]
+      )
+    ),
+    // value
+    React.createElement("div", {style:{display:"flex", alignItems:"baseline", gap:"6px", marginTop:"2px"}},
+      React.createElement("span", {style:{
+        fontFamily:"var(--font-display)", fontSize:"2rem", fontWeight:400, color:C.white, lineHeight:1,
+      }}, value != null ? (typeof value === "number" ? value.toLocaleString(undefined, {maximumFractionDigits:2}) : value) : "\u2014"),
+      unit && React.createElement("span", {style:{fontSize:"0.75rem", color:C.slate, fontWeight:400}}, unit)
+    ),
+    // bottom row
+    React.createElement("div", {style:{display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginTop:"auto"}},
+      React.createElement("div", {style:{display:"flex", alignItems:"center", gap:"4px"}},
+        change != null && React.createElement(React.Fragment, null,
+          React.createElement("span", {style:{fontSize:"0.7rem", color:changeColor}}, isUp ? "\u25B2" : "\u25BC"),
+          React.createElement("span", {style:{fontSize:"0.75rem", color:changeColor, fontWeight:500}},
+            (isUp ? "+" : "") + change
+          )
+        )
+      ),
+      React.createElement(Sparkline, {data:sparkData, color: status==="normal" ? C.gold : sColor})
+    )
+  );
+}
+
+// ─── SECTION HEADER ─────────────────────────────────────────────────
+function SectionHeader({number, title}) {
+  return React.createElement("div", {style:{
+    display:"flex", alignItems:"center", gap:"12px",
+    marginBottom:"14px", marginTop:"32px",
+  }},
+    React.createElement("div", {style:{
+      fontFamily:"var(--font-display)", fontSize:"0.85rem", fontWeight:500,
+      color:C.gold, minWidth:"20px",
+    }}, number),
+    React.createElement("div", {style:{
+      fontFamily:"var(--font-display)", fontSize:"1.1rem", fontWeight:500,
+      color:C.goldLight, letterSpacing:"0.06em",
+    }}, title),
+    React.createElement("div", {style:{
+      flex:1, height:"1px",
+      background:"linear-gradient(90deg, " + C.gold + "33, transparent)", marginLeft:"8px",
+    }})
+  );
+}
+
+// ─── MASTER CONDITIONS ──────────────────────────────────────────────
+function MasterConditions({data}) {
+  const conditions = useMemo(() => {
+    if (!data) return [];
+    const d = data;
+    return [
+      {id:"inflation", emoji:"\uD83D\uDD34", label:"INFLATION SHOCK MODE",
+        desc:"Oil >110 + 10Y yield rising + DXY rising",
+        active: d.oil?.value>110 && d.us10y?.change>0 && d.dxy?.change>0},
+      {id:"stress", emoji:"\uD83D\uDD34", label:"STRESS BUILDING",
+        desc:"HY spreads >500 + MOVE >140 + VIX >30",
+        active: d.hySpread?.value>500 && d.move?.value>140 && d.vix?.value>30},
+      {id:"sysbreak", emoji:"\uD83D\uDD34\uD83D\uDD34", label:"SYSTEM BREAK (CRISIS)",
+        desc:"HY >600 + MOVE >160 + KRE dropping >10% + curve steepening",
+        active: d.hySpread?.value>600 && d.move?.value>160 && d.kre?.value<-10},
+      {id:"gold", emoji:"\uD83D\uDFE2", label:"GOLD BREAKOUT",
+        desc:"Real yields <1.5 + DXY falling + credit stress rising",
+        active: d.realYield?.value<1.5 && d.dxy?.change<0 && d.hySpread?.value>400},
+      {id:"deflation", emoji:"\uD83D\uDD35", label:"DEFLATION SHIFT",
+        desc:"Oil <95 + yields falling + credit still widening",
+        active: d.oil?.value<95 && d.us10y?.change<0 && d.hySpread?.value>350},
+    ];
+  }, [data]);
+
+  const anyDanger = conditions.some(c => c.active && c.id!=="gold" && c.id!=="deflation");
+
+  return React.createElement("div", {style:{
+    background:C.navyMid, border:"1px solid "+C.border, padding:"24px", marginTop:"32px",
+  }},
+    React.createElement("div", {style:{display:"flex", alignItems:"center", gap:"10px", marginBottom:"18px"}},
+      React.createElement("div", {style:{
+        width:"8px", height:"8px", borderRadius:"50%",
+        background: anyDanger ? C.red : C.green,
+        boxShadow:"0 0 8px " + (anyDanger ? C.red : C.green) + "66",
+      }}),
+      React.createElement("div", {style:{
+        fontFamily:"var(--font-display)", fontSize:"1.15rem", fontWeight:500,
+        color:C.gold, letterSpacing:"0.08em",
+      }}, "MASTER RISK CONDITIONS")
+    ),
+    conditions.map(c => {
+      const activeColor = c.id==="gold" ? C.green : c.id==="deflation" ? "#5b8dd9" : C.red;
+      return React.createElement("div", {key:c.id, style:{
+        display:"flex", alignItems:"center", gap:"12px",
+        padding:"10px 14px", marginBottom:"6px",
+        background: c.active ? activeColor+"10" : C.navyLight,
+        border:"1px solid " + (c.active ? activeColor+"33" : C.border),
+      }},
+        React.createElement("span", {style:{fontSize:"1rem", minWidth:"28px"}}, c.emoji),
+        React.createElement("div", {style:{flex:1}},
+          React.createElement("div", {style:{fontSize:"0.72rem", fontWeight:600, color: c.active ? C.white : C.slate, letterSpacing:"0.08em"}}, c.label),
+          React.createElement("div", {style:{fontSize:"0.62rem", color:C.slate, marginTop:"1px"}}, c.desc)
+        ),
+        React.createElement("div", {style:{
+          fontSize:"0.55rem", fontWeight:600, letterSpacing:"0.1em",
+          color: c.active ? activeColor : C.slate+"44",
+        }}, c.active ? "ACTIVE" : "INACTIVE")
+      );
+    })
+  );
+}
+
+// ─── OPTIONAL HIGH VALUE ADDITIONS ──────────────────────────────────
+function OptionalSection() {
+  const [open, setOpen] = useState(false);
+  const items = [
+    {label:"TED Spread", value:"0.18", unit:"%", desc:"3M LIBOR \u2013 3M T-Bill"},
+    {label:"FRA-OIS Spread", value:"12.4", unit:"bps", desc:"Forward Rate Agreement vs OIS"},
+    {label:"Baltic Dry Index", value:"1,842", unit:"", desc:"Global shipping demand"},
+    {label:"Tanker Rates", value:"WS 128", unit:"", desc:"VLCC dirty tanker benchmark"},
+  ];
+  return React.createElement("div", {style:{marginTop:"32px"}},
+    React.createElement("button", {onClick:()=>setOpen(!open), style:{
+      display:"flex", alignItems:"center", gap:"10px", width:"100%",
+      background:"transparent", border:"1px solid "+C.border,
+      padding:"14px 18px", cursor:"pointer", textAlign:"left",
+    }},
+      React.createElement("span", {style:{
+        fontFamily:"var(--font-display)", fontSize:"1rem", fontWeight:500,
+        color:C.goldLight, letterSpacing:"0.06em",
+      }}, "7 \u00A0 Optional High Value Additions"),
+      React.createElement("span", {style:{
+        marginLeft:"auto", color:C.gold, fontSize:"0.7rem",
+        transition:"transform 0.3s", transform: open ? "rotate(180deg)" : "none",
+      }}, "\u25BC")
+    ),
+    open && React.createElement("div", {style:{
+      display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",
+      gap:"1px", background:C.border, marginTop:"1px",
+    }},
+      items.map(it => React.createElement("div", {key:it.label, style:{
+        background:C.navyMid, padding:"14px 16px",
+      }},
+        React.createElement("div", {style:{fontSize:"0.5rem", letterSpacing:"0.15em", color:C.slate, fontWeight:600, textTransform:"uppercase"}}, it.label),
+        React.createElement("div", {style:{display:"flex", alignItems:"baseline", gap:"4px", marginTop:"6px"}},
+          React.createElement("span", {style:{fontFamily:"var(--font-display)", fontSize:"1.5rem", fontWeight:400, color:C.white}}, it.value),
+          it.unit && React.createElement("span", {style:{fontSize:"0.68rem", color:C.slate}}, it.unit)
+        ),
+        React.createElement("div", {style:{fontSize:"0.55rem", color:C.slate+"88", marginTop:"3px"}}, it.desc)
+      ))
+    )
+  );
+}
+
+// ─── SETTINGS MODAL ─────────────────────────────────────────────────
+function SettingsModal({open, onClose, keys, onSave}) {
+  const [fredKey, setFredKey] = useState(keys.fred || "");
+  const [finnhubKey, setFinnhubKey] = useState(keys.finnhub || "");
+  useEffect(() => { setFredKey(keys.fred || ""); setFinnhubKey(keys.finnhub || ""); }, [keys, open]);
+  if (!open) return null;
+
+  const inputStyle = {
+    width:"100%", padding:"10px 14px", border:"1px solid "+C.border,
+    background:C.navyLight, color:C.white, fontFamily:"var(--font-body)",
+    fontSize:"0.82rem", outline:"none", boxSizing:"border-box",
+  };
+
+  return React.createElement("div", {style:{
+    position:"fixed", inset:0, zIndex:1000,
+    background:"rgba(0,0,0,0.6)", backdropFilter:"blur(4px)",
+    display:"flex", alignItems:"center", justifyContent:"center", padding:"20px",
+  }, onClick:onClose},
+    React.createElement("div", {style:{
+      background:C.navyMid, border:"1px solid "+C.borderGold,
+      padding:"28px 32px", maxWidth:"440px", width:"100%",
+    }, onClick:e=>e.stopPropagation()},
+      React.createElement("div", {style:{
+        fontFamily:"var(--font-display)", fontSize:"1.15rem", fontWeight:500,
+        color:C.gold, letterSpacing:"0.06em", marginBottom:"20px",
+      }}, "API Configuration"),
+      // FRED key
+      React.createElement("div", {style:{marginBottom:"16px"}},
+        React.createElement("label", {style:{fontSize:"0.55rem", letterSpacing:"0.15em", color:C.slate, fontWeight:600, display:"block", marginBottom:"6px"}}, "FRED API KEY"),
+        React.createElement("input", {style:inputStyle, value:fredKey, onChange:e=>setFredKey(e.target.value), placeholder:"Enter your FRED API key"}),
+        React.createElement("div", {style:{fontSize:"0.6rem", color:C.slate+"88", marginTop:"4px"}}, "Get free at fred.stlouisfed.org/docs/api/api_key.html")
+      ),
+      // Finnhub key
+      React.createElement("div", {style:{marginBottom:"20px"}},
+        React.createElement("label", {style:{fontSize:"0.55rem", letterSpacing:"0.15em", color:C.slate, fontWeight:600, display:"block", marginBottom:"6px"}}, "FINNHUB API KEY"),
+        React.createElement("input", {style:inputStyle, value:finnhubKey, onChange:e=>setFinnhubKey(e.target.value), placeholder:"Enter your Finnhub API key"}),
+        React.createElement("div", {style:{fontSize:"0.6rem", color:C.slate+"88", marginTop:"4px"}}, "Get free at finnhub.io/register")
+      ),
+      // Buttons
+      React.createElement("div", {style:{display:"flex", gap:"10px", justifyContent:"flex-end"}},
+        React.createElement("button", {onClick:onClose, style:{
+          padding:"10px 18px", border:"1px solid "+C.border, background:"transparent",
+          color:C.slate, cursor:"pointer", fontFamily:"var(--font-body)",
+          fontSize:"0.72rem", letterSpacing:"0.06em",
+        }}, "CANCEL"),
+        React.createElement("button", {onClick:()=>{onSave({fred:fredKey,finnhub:finnhubKey});onClose();}, style:{
+          padding:"10px 22px", border:"none", background:C.gold,
+          color:C.navy, cursor:"pointer", fontFamily:"var(--font-body)",
+          fontSize:"0.72rem", fontWeight:600, letterSpacing:"0.1em",
+        }}, "SAVE KEYS")
+      )
+    )
+  );
+}
+
+// ─── TOGGLE ─────────────────────────────────────────────────────────
+function Toggle({checked, onChange, label}) {
+  return React.createElement("label", {style:{display:"flex", alignItems:"center", gap:"6px", cursor:"pointer", userSelect:"none"}},
+    React.createElement("div", {onClick:onChange, style:{
+      width:"30px", height:"16px", position:"relative",
+      background: checked ? C.gold : C.navyLight,
+      border:"1px solid " + (checked ? C.gold : C.slate+"44"),
+      transition:"all 0.3s",
+    }},
+      React.createElement("div", {style:{
+        width:"10px", height:"10px",
+        background: checked ? C.navy : C.slate,
+        position:"absolute", top:"2px", left: checked ? "16px" : "2px",
+        transition:"all 0.3s",
+      }})
+    ),
+    React.createElement("span", {style:{fontSize:"0.62rem", color:C.slateLight, letterSpacing:"0.06em"}}, label)
+  );
+}
+
+// ─── GOLD SIGNAL ────────────────────────────────────────────────────
+function goldSignal(data) {
+  if (!data?.realYield || !data?.us10y) return "NEUTRAL";
+  if (data.realYield.change < 0 && data.us10y.change < 0) return "STRONG";
+  if (data.realYield.change > 0 && data.us10y.change > 0) return "WEAK";
+  return "NEUTRAL";
+}
+
+// ─── INDICATOR DEFINITIONS ──────────────────────────────────────────
+const SECTIONS = [
+  {section:"Credit Risk", number:"1", items:[
+    {id:"hySpread", label:"High Yield Spread", subtitle:"ICE BofA HY OAS \u00B7 FRED: BAMLH0A0HYM2"},
+    {id:"igCds",    label:"Investment Grade CDS", subtitle:"CDX IG Index"},
+    {id:"sovCds",   label:"US 5Y Sovereign CDS", subtitle:"Sovereign credit default swap"},
+  ]},
+  {section:"Rates / Liquidity", number:"2", items:[
+    {id:"us10y",      label:"US 10-Year Yield", subtitle:"FRED: DGS10"},
+    {id:"yieldCurve", label:"Yield Curve (2Y\u201310Y)", subtitle:"FRED: T10Y2Y"},
+    {id:"realYield",  label:"Real Yield (10Y TIPS)", subtitle:"FRED: DFII10"},
+  ]},
+  {section:"Volatility / Stress", number:"3", items:[
+    {id:"move", label:"MOVE Index", subtitle:"Bond market volatility"},
+    {id:"vix",  label:"VIX", subtitle:"S&P 500 implied volatility"},
+    {id:"ovx",  label:"OVX (Oil Volatility)", subtitle:"Crude oil implied volatility"},
+  ]},
+  {section:"Commodities / Inflation", number:"4", items:[
+    {id:"oil",        label:"Oil (Brent)", subtitle:"Global benchmark crude"},
+    {id:"gold",       label:"Gold", subtitle:null},
+    {id:"copperGold", label:"Copper / Gold Ratio", subtitle:"% change over rolling window"},
+  ]},
+  {section:"Currency / Capital Flows", number:"5", items:[
+    {id:"dxy", label:"DXY (Dollar Index)", subtitle:"US Dollar strength"},
+  ]},
+  {section:"Banking / System Stress", number:"6", items:[
+    {id:"kre", label:"KRE (Regional Banks)", subtitle:"SPDR S&P Regional Banking ETF"},
+  ]},
+];
+
+const MINIMAL_IDS = ["hySpread","us10y","move","oil","vix","kre"];
+
+// ─── MAIN APP ───────────────────────────────────────────────────────
+function App() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [minimal, setMinimal] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const intervalRef = useRef(null);
+
+  const [apiKeys, setApiKeys] = useState(() => {
+    try { const s = localStorage.getItem("aic_macro_keys"); return s ? JSON.parse(s) : {fred:"",finnhub:""}; }
+    catch(e) { return {fred:"",finnhub:""}; }
+  });
+
+  const saveKeys = useCallback((keys) => {
+    setApiKeys(keys);
+    try { localStorage.setItem("aic_macro_keys", JSON.stringify(keys)); } catch(e) {}
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    let result = makeDemoData();
+
+    // ── FRED fetches ──
+    if (apiKeys.fred) {
+      const series = [
+        {id:"hySpread",   series:"BAMLH0A0HYM2", unit:"bps"},
+        {id:"us10y",      series:"DGS10",         unit:"%"},
+        {id:"yieldCurve", series:"T10Y2Y",        unit:"%"},
+        {id:"realYield",  series:"DFII10",        unit:"%"},
+      ];
+      await Promise.allSettled(series.map(async (s) => {
+        const d = await fetchFRED(s.series, apiKeys.fred);
+        if (d) result[s.id] = {...result[s.id], ...d, unit:s.unit};
+      }));
+    }
+
+    // ── Finnhub fetches ──
+    if (apiKeys.finnhub) {
+      const symbols = [
+        {id:"vix",  symbol:"CBOE:VIX"},
+        {id:"oil",  symbol:"OANDA:BCO_USD"},
+        {id:"gold", symbol:"OANDA:XAU_USD"},
+        {id:"dxy",  symbol:"TVC:DXY"},
+        {id:"kre",  symbol:"KRE"},
+      ];
+      await Promise.allSettled(symbols.map(async (s) => {
+        const d = await fetchFinnhub(s.symbol, apiKeys.finnhub);
+        if (d) result[s.id] = {...result[s.id], value:d.value, change:d.change};
+      }));
+    }
+
+    setData(result);
+    setLastUpdated(new Date());
+    setLoading(false);
+  }, [apiKeys]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  useEffect(() => {
+    if (autoRefresh) { intervalRef.current = setInterval(fetchAll, 60000); }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [autoRefresh, fetchAll]);
+
+  const gSig = goldSignal(data);
+  const hasKeys = apiKeys.fred || apiKeys.finnhub;
+
+  // ─── NAV ──────────────────────────────────────────────────────────
+  const Nav = () => React.createElement("div", null,
+    React.createElement("div", {style:{
+      background:C.navy, padding:"14px 0", borderBottom:"1px solid "+C.border,
+    }},
+      React.createElement("div", {style:{
+        maxWidth:"1100px", margin:"0 auto", padding:"0 24px",
+        display:"flex", justifyContent:"space-between", alignItems:"center",
+        flexWrap:"wrap", gap:"10px",
+      }},
+        // Logo
+        React.createElement("div", {style:{
+          fontFamily:"var(--font-display)", fontSize:"1.35rem", fontWeight:500,
+          letterSpacing:"0.06em", color:C.white,
+        }},
+          "AGENTIC ", React.createElement("span", {style:{color:C.gold}}, "INSIGHT CAPITAL")
+        ),
+        // Right side controls
+        React.createElement("div", {style:{display:"flex", alignItems:"center", gap:"14px", flexWrap:"wrap"}},
+          lastUpdated && React.createElement("span", {style:{
+            fontSize:"0.6rem", color:C.slate+"88", letterSpacing:"0.06em",
+          }}, "Updated " + lastUpdated.toLocaleTimeString()),
+          React.createElement(Toggle, {checked:minimal, onChange:()=>setMinimal(!minimal), label:"Minimal"}),
+          React.createElement(Toggle, {checked:autoRefresh, onChange:()=>setAutoRefresh(!autoRefresh), label:"Auto-refresh"}),
+          React.createElement("button", {onClick:()=>setSettingsOpen(true), style:{
+            background:"transparent", border:"1px solid "+C.border,
+            padding:"6px 12px", color:C.slateLight, cursor:"pointer",
+            fontFamily:"var(--font-body)", fontSize:"0.62rem", letterSpacing:"0.1em",
+          }}, "\u2699 SETTINGS"),
+          React.createElement("button", {onClick:fetchAll, disabled:loading, style:{
+            background:C.gold, border:"none", padding:"6px 14px",
+            color:C.navy, cursor:"pointer", fontFamily:"var(--font-body)",
+            fontSize:"0.62rem", fontWeight:600, letterSpacing:"0.1em",
+            opacity: loading ? 0.5 : 1,
+          }}, "\u21BB REFRESH")
+        )
+      )
+    ),
+    React.createElement("div", {style:{
+      height:"1px", background:"linear-gradient(90deg, transparent, rgba(184,151,58,0.25), transparent)",
+    }})
+  );
+
+  // ─── FOOTER ───────────────────────────────────────────────────────
+  const Footer = () => React.createElement("div", null,
+    React.createElement("div", {style:{
+      height:"1px", background:"linear-gradient(90deg, transparent, rgba(184,151,58,0.25), transparent)",
+    }}),
+    React.createElement("div", {style:{padding:"24px 0", textAlign:"center"}},
+      React.createElement("div", {style:{
+        fontFamily:"var(--font-display)", fontSize:"1rem", fontWeight:500,
+        letterSpacing:"0.06em", color:C.white, marginBottom:"4px",
+      }}, "AGENTIC ", React.createElement("span", {style:{color:C.gold}}, "INSIGHT CAPITAL")),
+      React.createElement("p", {style:{color:C.slate, fontSize:"0.72rem", marginBottom:"4px"}}, "Vancouver, Canada"),
+      React.createElement("p", {style:{
+        color:C.slate, fontSize:"0.62rem", lineHeight:1.7, maxWidth:"600px", margin:"8px auto 0",
+      }}, "Data sources: FRED (St. Louis Fed) \u00B7 Finnhub \u00B7 Market data delayed \u226515 min. For informational purposes only \u2014 not investment advice."),
+      React.createElement("p", {style:{
+        color:"rgba(136,153,176,0.5)", fontSize:"0.6rem", marginTop:"8px",
+      }}, "\u00A9 " + new Date().getFullYear() + " Agentic Insight Capital. All rights reserved.")
+    )
+  );
+
+  // ─── RENDER ───────────────────────────────────────────────────────
+  return React.createElement("div", {style:{minHeight:"100vh", background:C.navy, color:C.white, fontFamily:"var(--font-body)"}},
+    React.createElement(Nav),
+
+    // Hero header
+    React.createElement("div", {style:{
+      background:C.navyMid, padding:"28px 24px", borderBottom:"1px solid "+C.border,
+    }},
+      React.createElement("div", {style:{maxWidth:"1100px", margin:"0 auto", display:"flex", justifyContent:"space-between", alignItems:"baseline", flexWrap:"wrap", gap:"12px"}},
+        React.createElement("div", null,
+          React.createElement("div", {style:{color:C.gold, fontSize:"0.6rem", letterSpacing:"0.25em", fontWeight:600, marginBottom:"6px"}}, "MACRO SURVEILLANCE"),
+          React.createElement("h1", {style:{
+            fontSize:"clamp(1.4rem,3vw,1.8rem)", color:C.white, margin:0, fontWeight:400,
+            fontFamily:"var(--font-display)",
+          }}, "Core Macro Risk Monitor")
+        ),
+        !hasKeys && React.createElement("div", {style:{
+          display:"inline-flex", alignItems:"center", gap:"6px",
+          padding:"6px 14px", background:C.amber+"10", border:"1px solid "+C.amber+"33",
+        }},
+          React.createElement("span", {style:{fontSize:"0.7rem"}}, "\u26A0"),
+          React.createElement("span", {style:{fontSize:"0.62rem", color:C.amber}},
+            "Demo data \u2014 open Settings to connect APIs"
+          )
+        )
+      )
+    ),
+
+    // Content
+    React.createElement("div", {style:{maxWidth:"1100px", margin:"0 auto", padding:"0 24px 48px"}},
+      SECTIONS.map(sec => {
+        const items = minimal ? sec.items.filter(it => MINIMAL_IDS.includes(it.id)) : sec.items;
+        if (items.length === 0) return null;
+        return React.createElement("div", {key:sec.section},
+          React.createElement(SectionHeader, {title:sec.section, number:sec.number}),
+          React.createElement("div", {style:{
+            display:"grid",
+            gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))",
+            gap:"1px", background:C.border,
+          }},
+            items.map(it => {
+              const d = data?.[it.id];
+              let sub = it.subtitle;
+              if (it.id === "gold") {
+                sub = "Signal: " + gSig + " \u2014 " + (gSig==="STRONG" ? "Yields falling" : gSig==="WEAK" ? "Yields rising" : "Neutral");
+              }
+              return React.createElement(Card, {
+                key:it.id, id:it.id, label:it.label, subtitle:sub,
+                value:d?.value, change:d?.change, unit:d?.unit||"",
+                sparkData:d?.spark,
+              });
+            })
+          )
+        );
+      }),
+      !minimal && React.createElement(OptionalSection),
+      React.createElement(MasterConditions, {data})
+    ),
+
+    React.createElement(Footer),
+    React.createElement(SettingsModal, {
+      open:settingsOpen, onClose:()=>setSettingsOpen(false),
+      keys:apiKeys, onSave:saveKeys,
+    })
+  );
+}
+
+ReactDOM.render(React.createElement(App), document.getElementById("root"));
+</script>
+</body>
+</html>
